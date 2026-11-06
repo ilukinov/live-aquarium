@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
@@ -135,6 +135,21 @@
     display: block; width: 100%; height: min(70vh, 620px);
     border: 0; border-radius: 14px; background: transparent;
   }
+  .menu .card.draw-fullscreen {
+    position: fixed !important; inset: 0 !important; width: 100vw !important; height: 100vh !important;
+    max-width: 100vw !important; max-height: 100vh !important;
+    border-radius: 0 !important; border: 0 !important;
+    padding: 0 !important; margin: 0 !important; z-index: 100 !important;
+    background: #04101c !important;
+  }
+  .menu .card.draw-fullscreen .capframe {
+    height: 100vh !important; width: 100vw !important;
+    border-radius: 0 !important; max-height: none !important;
+  }
+  .menu .card.draw-fullscreen .goback,
+  .menu .card.draw-fullscreen .x {
+    display: none !important;
+  }
 
   .menu .packgrid {
     display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
@@ -230,6 +245,10 @@
       <button class="item main" id="m-capture" type="button">
         <span class="ico">📷</span>
         <span><b data-t="menu.capture.title"></b><i data-t="menu.capture.sub"></i></span>
+      </button>
+      <button class="item" id="m-draw" type="button">
+        <span class="ico">🖌️</span>
+        <span><b data-t="menu.draw.title"></b><i data-t="menu.draw.sub"></i></span>
       </button>
       <button class="item" id="m-pack" type="button">
         <span class="ico">🐠</span>
@@ -1044,6 +1063,7 @@
   function withPaintedTemplate(kind, cb) {
     if (paintedTemplates[kind]) return cb(paintedTemplates[kind]);
     withPackModel(paintedModel(kind), function (base) {
+      if (!base) return cb(null);
       if (paintedTemplates[kind]) return cb(paintedTemplates[kind]);
       cb(buildPaintedTemplate(kind, base));
     });
@@ -1166,7 +1186,7 @@
 
     var start = function () {
       var item = packList && packList.filter(function (m) { return m.name === name; })[0];
-      if (!item) return;
+      if (!item) item = { name: name, url: '/assets/models/pack/' + name + '/' + name + '.gltf' };
       packModels[name] = 'loading';
       gltfLoader().load(item.url, function (gltf) {
         var known = paintedSpec[name];
@@ -1184,18 +1204,20 @@
       }, undefined, function (err) {
         delete packModels[name];
         console.error('пак: не загрузилась ' + name, err);
+        cb(null);
       });
     };
 
     if (packList) return start();
     fetch('/api/pack').then(function (r) { return r.json(); })
       .then(function (list) { packList = list; start(); })
-      .catch(function () { packList = []; });
+      .catch(function () { packList = []; start(); });
   }
 
   function spawnPack(name) {
     var holder = { fish: null };
     withPackModel(name, function (base) {
+      if (!base) return;
       var spec = {
         name: 'pack-' + name,
         gltf: base.gltf,
@@ -1261,7 +1283,10 @@
           if (!paintedSeen.hasOwnProperty(item.id)) return;   // удалили, пока грузилась
           spawnPainted(item.kind, tex, function (fish) {
             // модель ехала дольше текстуры — рыбку могли успеть удалить
-            if (!fish) return;
+            if (!fish) {
+              delete paintedSeen[item.id];
+              return;
+            }
             if (paintedSeen.hasOwnProperty(item.id)) { paintedSeen[item.id] = fish; wantShot(4); }
             else {
               scene.remove(fish.mesh);
@@ -1270,6 +1295,8 @@
               paintedCount--;
             }
           });
+        }, undefined, function () {
+          delete paintedSeen[item.id];
         });
       });
   }
@@ -1759,7 +1786,11 @@
     menuCard.classList.toggle('wide', !!wide);
   }
 
-  function showMainView() { showView(menuMain, false); }
+  function showMainView() {
+    menuCard.classList.remove('draw-fullscreen');
+    capFrame.classList.remove('draw-fullscreen');
+    showView(menuMain, false);
+  }
 
   // Врезку заводим при первом открытии: пока её не позвали, страница не
   // грузится и не тянет свой three.js и свои картинки.
@@ -1777,6 +1808,13 @@
     var f = frameUp(capFrame, Tank.url + '/capture?embed=1');
     // Врезка осталась на том экране, где её бросили: просим начать сначала.
     if (f.dataset.up && f.contentWindow) f.contentWindow.postMessage({ aqua: 'reset' }, location.origin);
+    f.dataset.up = '1';
+  }
+
+  function showDrawView() {
+    showView(menuCapture, true);
+    var f = frameUp(capFrame, Tank.url + '/capture?embed=1#draw');
+    if (f.dataset.up && f.contentWindow) f.contentWindow.postMessage({ aqua: 'open-draw' }, location.origin);
     f.dataset.up = '1';
   }
 
@@ -2063,6 +2101,8 @@
   document.getElementById('m-pack').onclick = showPackView;
   document.getElementById('m-packback').onclick = showMainView;
   document.getElementById('m-capture').onclick = showCaptureView;
+  var mDraw = document.getElementById('m-draw');
+  if (mDraw) mDraw.onclick = showDrawView;
   document.getElementById('m-capback').onclick = showMainView;
   document.getElementById('m-bg').onclick = showBgView;
   document.getElementById('m-bgback').onclick = showMainView;
@@ -2077,6 +2117,22 @@
   addEventListener('message', function (e) {
     if (e.origin !== location.origin || !e.data) return;
     if (e.data.aqua === 'fish-added') { pollPainted(); wantShot(2); }
+    if (e.data.aqua === 'close-menu') { hideMenu(); }
+    if (e.data.aqua === 'mode') {
+      var m = e.data.mode;
+      if (m === 's-draw') {
+        menuCard.classList.add('draw-fullscreen');
+        capFrame.classList.add('draw-fullscreen');
+      } else {
+        menuCard.classList.remove('draw-fullscreen');
+        capFrame.classList.remove('draw-fullscreen');
+        if (m === 's-pick') {
+          menuCard.classList.add('wide');
+        } else {
+          menuCard.classList.remove('wide');
+        }
+      }
+    }
     // Врезка сообщает свою высоту — карточка перестаёт быть с пустым низом.
     // Спрятанная врезка присылает ноль: её высоту не трогаем, иначе при
     // возврате карточка схлопнулась бы в полоску.

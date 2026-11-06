@@ -56,7 +56,7 @@ const path = require('path');
 const os = require('os');
 
 const ROOT = __dirname;
-const PORT = Number(process.env.PORT) || 8000;
+const PORT = Number(process.env.PORT) || 3000;
 const MAX_BODY = 12 * 1024 * 1024;
 // Папка данных. По умолчанию — data рядом с сервером, как всегда; тесты
 // (test/) поднимают сервер на пустой временной папке.
@@ -380,6 +380,13 @@ function sheetKinds() {
 
 function listPack() {
   try {
+    if (!fs.existsSync(PACK_FILE)) {
+      try {
+        require('./tools/make-models.js');
+      } catch (err) {
+        console.error('Не удалось сгенерировать модели:', err);
+      }
+    }
     const raw = fs.readFileSync(PACK_FILE, 'utf8').replace(/^﻿/, '');
     const list = JSON.parse(raw);
     if (!Array.isArray(list)) return [];
@@ -644,9 +651,11 @@ function send(res, code, body, type) {
 // свои врезки (съёмка в аквариуме) работают. no-referrer — код аквариума в
 // адресе не уходит на внешние ссылки. Камера — только своим страницам.
 // HSTS — только за HTTPS (на проде; дома сервер работает по http).
+const ALLOW_EMBED = process.env.AQUA_ALLOW_EMBED === '1' || process.env.PORT === '3000' || !process.env.PORT;
+
 const SECURITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
-  'X-Frame-Options': 'SAMEORIGIN',
+  ...(ALLOW_EMBED ? {} : { 'X-Frame-Options': 'SAMEORIGIN' }),
   'Referrer-Policy': 'no-referrer',
   'Permissions-Policy': 'camera=(self), microphone=(), geolocation=(), payment=(), usb=()',
   ...(/^https:/.test(process.env.SITE_URL || 'https://aquarium.mrmot9i.com') && process.env.AQUA_HSTS !== '0'
@@ -678,7 +687,7 @@ function cspFor(file) {
     v = ["default-src 'self'", "script-src 'self' 'wasm-unsafe-eval' " + hashes.join(' '),
          "worker-src 'self' blob:", "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob:",
          "connect-src 'self' data: blob:", "media-src 'self' blob:", "object-src 'none'",
-         "base-uri 'none'", "frame-ancestors 'self'", "form-action 'self'"].join('; ');
+         "base-uri 'none'", (ALLOW_EMBED ? "frame-ancestors *" : "frame-ancestors 'self'"), "form-action 'self'"].join('; ');
     if (cspCache.size > 50) cspCache.clear();
     cspCache.set(key, v);
   }
@@ -1139,9 +1148,13 @@ async function handleTankApi(req, res, t, url) {
   }
 
   const texMatch = url.match(/^\/fish\/([a-z0-9-]+)\/texture\.png$/);
-  if (req.method === 'GET' && texMatch) {
+  if ((req.method === 'GET' || req.method === 'HEAD') && texMatch) {
     const file = path.join(t.fish, texMatch[1] + '.png');
     if (!fs.existsSync(file)) return send(res, 404, '{"error":"not found"}');
+    if (req.method === 'HEAD') {
+      res.writeHead(200, { 'Content-Type': 'image/png', 'Content-Length': fs.statSync(file).size });
+      return res.end();
+    }
     return send(res, 200, fs.readFileSync(file), 'image/png');
   }
 

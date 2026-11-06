@@ -178,7 +178,7 @@
   <div class="bubble">📷</div>
   <label class="big" for="file" data-t="cap.shoot"></label>
   <input type="file" id="file" accept="image/*" capture="environment">
-  <button class="big ghost" id="b-draw" data-t="cap.draw"></button>
+  <button class="big ghost" id="b-draw" type="button" data-t="cap.draw"></button>
   <p class="hintline" data-t="cap.hint"></p>
   <div class="qrrow" id="qrrow" hidden>
     <span class="qrbox" id="cap-qr"></span>
@@ -234,8 +234,9 @@
   <div class="bubble">🎉</div>
   <p class="fishname" data-t="cap.done"></p>
   <p class="sub" id="done-sub" data-t="cap.done.sub"></p>
-  <label class="big" for="file" data-t="cap.again"></label>
-  <button class="big ghost" id="b-draw2" data-t="cap.draw"></button>
+  <a class="big green" id="b-view-tank" style="text-decoration:none;" href="" data-t="cap.view">Посмотреть в аквариуме 🐠</a>
+  <label class="big ghost" for="file" data-t="cap.again"></label>
+  <button class="big ghost" id="b-draw2" type="button" data-t="cap.draw"></button>
 </div>
 
 <!-- ошибка -->
@@ -265,6 +266,16 @@
   if (!Tank.id) { location.replace('/'); return; }
 
   document.getElementById('back').href = Tank.url;
+  var bViewTank = document.getElementById('b-view-tank');
+  if (bViewTank) {
+    bViewTank.href = Tank.url;
+    bViewTank.addEventListener('click', function (e) {
+      if (inFrame) {
+        e.preventDefault();
+        tell({ aqua: 'close-menu' });
+      }
+    });
+  }
 
   // Страница открыта внутри меню аквариума — убираем всё, что там повторяется.
   var EMBED = new URLSearchParams(location.search).has('embed');
@@ -323,6 +334,9 @@
         result = null;
         show('s-start');
         tellHeight();
+      }
+      if (e.data.aqua === 'open-draw') {
+        openPick();
       }
     });
   }
@@ -451,8 +465,11 @@
 
   function show(id) {
     document.querySelectorAll('.screen').forEach(function (s) { s.classList.remove('on'); });
-    document.getElementById(id).classList.add('on');
+    var el = document.getElementById(id);
+    if (el) el.classList.add('on');
     document.body.classList.toggle('drawing', id === 's-draw');
+    tell({ aqua: 'mode', mode: id });
+    tellHeight();
   }
 
   fetch('/assets/coloring/manifest.json')
@@ -662,7 +679,16 @@
   }
 
   function openPick() {
-    if (!manifest) return;
+    if (!manifest) {
+      fetch('/assets/coloring/manifest.json')
+        .then(function (r) { return r.json(); })
+        .then(function (m) { manifest = m; openPick(); })
+        .catch(function () {
+          show('s-error');
+          document.getElementById('err-text').textContent = I18N.t('cap.err.manifest');
+        });
+      return;
+    }
     buildPicks();
     show('s-pick');
   }
@@ -678,21 +704,25 @@
       undo = [];
       show('s-draw');
       layout();
+      setTimeout(layout, 50);
+      setTimeout(layout, 200);
     };
     img.src = sheetUrl(f);
   }
 
-  // В меню аквариума страница живёт в маленькой врезке — рисовать там негде,
-  // поэтому раскраска открывается отдельной страницей на весь экран.
   function drawEntry() {
-    if (inFrame) { window.top.location.href = Tank.url + '/capture#draw'; return; }
     openPick();
   }
   document.getElementById('b-draw').addEventListener('click', drawEntry);
   document.getElementById('b-draw2').addEventListener('click', drawEntry);
   document.getElementById('d-pickback').addEventListener('click', function () { show('s-start'); });
   document.getElementById('d-back').addEventListener('click', openPick);
-  document.getElementById('b-redraw').addEventListener('click', function () { show('s-draw'); layout(); });
+  document.getElementById('b-redraw').addEventListener('click', function () {
+    show('s-draw');
+    layout();
+    setTimeout(layout, 50);
+    setTimeout(layout, 200);
+  });
 
   function remember() {
     undo.push(pctx.getImageData(0, 0, paper.width, paper.height));
