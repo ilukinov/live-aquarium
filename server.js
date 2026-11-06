@@ -1346,6 +1346,15 @@ async function handleApi(req, res, url) {
     return send(res, 404, '{"error":"демо не настроено"}');
   }
 
+  // Домашний режим: AQUA_LIST_TANKS=1 отдаёт коды всех аквариумов, и главная
+  // показывает их все. Только для своей сети — код и есть доступ к аквариуму.
+  if (req.method === 'GET' && url === '/api/tanks') {
+    if (process.env.AQUA_LIST_TANKS !== '1') return send(res, 404, '{"error":"список выключен"}');
+    let ids = [];
+    try { ids = fs.readdirSync(TANKS).filter((id) => TANK_ID_RE.test(id) && fs.existsSync(tank(id).meta)); } catch (e) { /* папки ещё нет */ }
+    return send(res, 200, JSON.stringify({ ids }));
+  }
+
   if (req.method === 'POST' && url === '/api/tanks') {
     if (tanksCount() >= LIMITS.tanks) {
       return send(res, 507, '{"error":"на сервере больше нет места для новых аквариумов"}');

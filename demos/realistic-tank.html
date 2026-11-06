@@ -464,8 +464,9 @@
 
   // ── сцена ────────────────────────────────────────────────────────────────
   function init() {
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
+    // Просьба, не приказ: браузер сам решает, какой GPU дать.
+    renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    renderer.setPixelRatio(pr);
     renderer.setSize(innerWidth, innerHeight);
     renderer.outputEncoding = THREE.sRGBEncoding;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;   // киношная тональная компрессия
@@ -1388,9 +1389,64 @@
   });
 
   // ── цикл ─────────────────────────────────────────────────────────────────
+  // Разрешение рендера следует за частотой кадров. Телевизор отдаёт браузеру
+  // огромный экран при слабой видеокарте: каждая рыбка — это сотни тысяч
+  // пикселей тяжёлого шейдера, и после пятой кадры сыплются. Меряем окнами
+  // по 2 с и сравниваем с лучшим замером — это частота экрана (60, 50 или 30),
+  // поэтому порог сам подстраивается под 50-герцовый телевизор.
+  // shortcut: потолок после просадки не сбрасывается — если рыбок убрали,
+  // чёткость вернётся только после перезагрузки; хватит, пока аквариум растёт.
+  var PR_MAX = Math.min(devicePixelRatio, 1.75), PR_MIN = 0.5;
+  var pr = PR_MAX, prCeil = PR_MAX, prBest = 0;
+  var prFrames = 0, prTime = 0, prSlow = 0, prFast = 0;
+
+  function adaptResolution(rawDt) {
+    // Вкладка спала — rAF стоял, такой кадр ничего не говорит о скорости.
+    if (rawDt > 0.5) { prFrames = 0; prTime = 0; return; }
+    prFrames++; prTime += rawDt;
+    if (prTime < 2) return;
+    var fps = prFrames / prTime;
+    prFrames = 0; prTime = 0;
+    if (fps > prBest) prBest = fps;
+
+    // Одно медленное окно — это подгрузка новой рыбки, не повод мутнеть.
+    prSlow = fps < prBest * 0.85 ? prSlow + 1 : 0;
+    prFast = fps > prBest * 0.95 ? prFast + 1 : 0;
+    var next = pr;
+    // Потолок ставим ниже уровня, который не потянули, — иначе качели.
+    if (prSlow >= 2) { prCeil = pr * 0.9; next = Math.max(PR_MIN, pr * 0.8); prSlow = 0; }
+    else if (prFast >= 5 && pr < prCeil) { next = Math.min(prCeil, pr * 1.1); prFast = 0; }
+    if (next !== pr) { pr = next; renderer.setPixelRatio(pr); }
+    if (STATS) showStats(fps);
+  }
+
+  // /t/<id>?stats — что на самом деле рисует телевизор: настоящий ли это GPU
+  // (а не программный SwiftShader), какого размера холст, сколько треугольников.
+  var STATS = new URLSearchParams(location.search).has('stats');
+  var statsEl = null, gpuName = '';
+  function showStats(fps) {
+    if (!statsEl) {
+      statsEl = document.createElement('pre');
+      statsEl.style.cssText = 'position:fixed;left:8px;top:8px;z-index:99;margin:0;padding:8px 10px;' +
+        'background:rgba(0,0,0,.7);color:#7fffb0;font:14px/1.35 monospace;pointer-events:none';
+      document.body.appendChild(statsEl);
+      var gl = renderer.getContext(), ext = gl.getExtension('WEBGL_debug_renderer_info');
+      gpuName = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+    }
+    var c = renderer.domElement, info = renderer.info.render;
+    statsEl.textContent = [
+      'fps ' + fps.toFixed(1) + ' (best ' + prBest.toFixed(0) + ')',
+      'canvas ' + c.width + '×' + c.height + ' @ ' + pr.toFixed(2) + ' (dpr ' + devicePixelRatio + ')',
+      'fish ' + fishes.length + ' · calls ' + info.calls + ' · tris ' + info.triangles,
+      'webgl ' + (renderer.capabilities.isWebGL2 ? 2 : 1) + ' · ' + gpuName
+    ].join('\n');
+  }
+
   function animate() {
     requestAnimationFrame(animate);
-    var dt = Math.min(clock.getDelta(), 0.05);
+    var raw = clock.getDelta();
+    adaptResolution(raw);
+    var dt = Math.min(raw, 0.05);
     var t = clock.elapsedTime;
     uTime.value = t;
 
