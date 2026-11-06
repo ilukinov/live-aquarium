@@ -696,6 +696,18 @@
   };
 
   render();
+
+  // Домашний режим сервера (AQUA_LIST_TANKS=1): все аквариумы — в список.
+  fetch('/api/tanks')
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) {
+      if (!d) return;
+      var known = Tank.known();
+      var add = d.ids.filter(function (id) { return Tank.isValidId(id) && known.indexOf(id) < 0; });
+      add.forEach(Tank.remember);
+      if (add.length) render();
+    })
+    .catch(function () { /* список выключен */ });
 })();
 </script>
 </body>
