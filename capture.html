@@ -125,6 +125,45 @@
   }
   .qrrow .qrbox svg { display: block; width: 96px; height: 96px; }
   .qrrow .qrtext { color: var(--muted); font-size: 13px; }
+
+  /* Раскраска на экране: сначала выбор рыбы по контурам, потом холст на
+     весь экран — на планшете рисуют пальцем или Apple Pencil. */
+  #s-pick.on { max-width: 1000px; }
+  .picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  .picks button {
+    background: #fff; border: 0; border-radius: 16px; padding: 10px 8px 6px;
+    cursor: pointer; font: inherit; font-size: 14px; color: #234;
+  }
+  .picks button:active { transform: scale(.97); }
+  .picks svg { display: block; width: 100%; height: 90px; }
+
+  body.drawing { overflow: hidden; position: fixed; inset: 0; padding: 0; }
+  #s-draw.on {
+    position: fixed; inset: 0; z-index: 10; max-width: none;
+    display: flex; flex-direction: column; background: #dfe7ee;
+    touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  .drawbar {
+    flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    padding: 8px 10px; background: #04101c;
+  }
+  .drawbar button {
+    font: inherit; font-size: 15px; color: var(--ink); cursor: pointer;
+    background: #0a2233; border: 1.5px solid rgba(140, 200, 255, 0.3);
+    border-radius: 12px; padding: 9px 14px; min-height: 44px;
+  }
+  .drawbar button.on { border-color: var(--accent); background: #0d4a6b; }
+  .drawbar .grow { flex: 1; }
+  .drawbar #d-done { background: var(--ok); color: #04101c; font-weight: 600; border: 0; }
+  .swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+  .swatches button {
+    width: 40px; height: 40px; min-height: 0; padding: 0; border-radius: 50%;
+    border: 3px solid transparent; outline: 1px solid rgba(255,255,255,.35);
+  }
+  .swatches button.on { border-color: #fff; transform: scale(1.12); }
+  #stage { flex: 1; position: relative; overflow: hidden; }
+  #paper { position: absolute; background: #fff; touch-action: none; cursor: crosshair; }
 </style>
 </head>
 <body>
@@ -139,11 +178,35 @@
   <div class="bubble">📷</div>
   <label class="big" for="file" data-t="cap.shoot"></label>
   <input type="file" id="file" accept="image/*" capture="environment">
+  <button class="big ghost" id="b-draw" data-t="cap.draw"></button>
   <p class="hintline" data-t="cap.hint"></p>
   <div class="qrrow" id="qrrow" hidden>
     <span class="qrbox" id="cap-qr"></span>
     <span class="qrtext" data-t="cap.qr"></span>
   </div>
+</div>
+
+<!-- раскраска на экране: выбор рыбы -->
+<div class="screen" id="s-pick">
+  <p class="fishname" data-t="cap.draw.pick"></p>
+  <div class="picks" id="picks"></div>
+  <button class="big ghost" id="d-pickback" data-t="cap.draw.back"></button>
+</div>
+
+<!-- раскраска на экране: холст на весь экран -->
+<div class="screen" id="s-draw">
+  <div class="drawbar">
+    <button id="d-back">←</button>
+    <button id="d-brush" class="on" data-t="cap.draw.brush"></button>
+    <button id="d-fill" data-t="cap.draw.fill"></button>
+    <button id="d-size">●</button>
+    <button id="d-undo" data-t="cap.draw.undo"></button>
+    <button id="d-clear" data-t="cap.draw.clear"></button>
+    <span class="grow"></span>
+    <button id="d-done" data-t="cap.draw.done"></button>
+  </div>
+  <div class="drawbar swatches" id="d-colors"></div>
+  <div id="stage"><canvas id="paper"></canvas></div>
 </div>
 
 <!-- обработка -->
@@ -162,6 +225,7 @@
     <input type="range" id="boost" min="0" max="100" value="0">
   </div>
   <button class="big green" id="b-release" data-t="cap.release"></button>
+  <button class="big ghost" id="b-redraw" hidden data-t="cap.draw.more"></button>
   <label class="big ghost" for="file" data-t="cap.retake"></label>
 </div>
 
@@ -171,6 +235,7 @@
   <p class="fishname" data-t="cap.done"></p>
   <p class="sub" id="done-sub" data-t="cap.done.sub"></p>
   <label class="big" for="file" data-t="cap.again"></label>
+  <button class="big ghost" id="b-draw2" data-t="cap.draw"></button>
 </div>
 
 <!-- ошибка -->
@@ -387,11 +452,12 @@
   function show(id) {
     document.querySelectorAll('.screen').forEach(function (s) { s.classList.remove('on'); });
     document.getElementById(id).classList.add('on');
+    document.body.classList.toggle('drawing', id === 's-draw');
   }
 
   fetch('/assets/coloring/manifest.json')
     .then(function (r) { return r.json(); })
-    .then(function (m) { manifest = m; })
+    .then(function (m) { manifest = m; if (location.hash === '#draw') openPick(); })
     .catch(function () {
       show('s-error');
       document.getElementById('err-text').textContent = I18N.t('cap.err.manifest');
@@ -455,6 +521,7 @@
     var file = this.files && this.files[0];
     this.value = '';
     if (!file || !manifest) return;
+    document.getElementById('b-redraw').hidden = true;
     document.getElementById('b-resend').hidden = true;      // новая рыбка —
     document.getElementById('l-retry').classList.remove('ghost');  // старую не шлём
     show('s-busy');
@@ -510,6 +577,223 @@
   document.getElementById('b-resend').addEventListener('click', function () { window.releaseFish(); });
 
   document.getElementById('b-release').addEventListener('click', function () { window.releaseFish(); });
+
+  // ── раскраска на экране ──
+  // Лист рисуется на холст в том же масштабе, что и выровненное фото, и
+  // готовый холст уходит в handlePhoto как снимок: метки на нём идеальные,
+  // так что дальше всё как с бумагой — 3D-превью, ползунок, выпуск.
+  // На экране холст увеличен так, что рыба занимает его целиком.
+  var MM = 6;
+  var paper = document.getElementById('paper');
+  var stage = document.getElementById('stage');
+  var pctx = paper.getContext('2d', { willReadFrequently: true });
+  var fish = null, sheetImg = null, tool = 'brush', color = '#ff7a1a';
+  var sizes = [8, 18, 36], size = 1, undo = [];
+  var COLORS = ['#e8262a', '#ff7a1a', '#ffd31a', '#7ed321', '#1aa84c', '#1ac8e8',
+                '#1a5ae8', '#7a3ae8', '#e83ab4', '#ff9ec4', '#8b5a2b', '#ffffff', '#222222'];
+
+  var colorsEl = document.getElementById('d-colors');
+  COLORS.forEach(function (c) {
+    var b = document.createElement('button');
+    b.style.background = c;
+    b.setAttribute('aria-label', c);
+    if (c === color) b.classList.add('on');
+    b.addEventListener('click', function () {
+      color = c;
+      colorsEl.querySelectorAll('button').forEach(function (x) { x.classList.toggle('on', x === b); });
+    });
+    colorsEl.appendChild(b);
+  });
+
+  function setTool(t) {
+    tool = t;
+    document.getElementById('d-brush').classList.toggle('on', t === 'brush');
+    document.getElementById('d-fill').classList.toggle('on', t === 'fill');
+  }
+  document.getElementById('d-brush').addEventListener('click', function () { setTool('brush'); });
+  document.getElementById('d-fill').addEventListener('click', function () { setTool('fill'); });
+  document.getElementById('d-size').addEventListener('click', function () {
+    size = (size + 1) % sizes.length;
+    this.style.fontSize = (12 + size * 7) + 'px';
+    setTool('brush');
+  });
+
+  function titleOf(f) { return (f.titles && (f.titles[I18N.lang] || f.titles.ru)) || f.title; }
+  function sheetUrl(f) {
+    return '/' + ((f.sheets && f.sheets[I18N.lang]) || f.svg).replace(/^\//, '');
+  }
+
+  // Габарит рыбы на листе, мм — по нему кадрируем холст на экране.
+  function fishBox(f) {
+    var st = f.sheetTransform, bz = f.bboxModel.z, by = f.bboxModel.y, pad = 6;
+    return { x0: st.ox + st.scale * bz[0] - pad, x1: st.ox + st.scale * bz[1] + pad,
+             y0: st.oy - st.scale * by[1] - pad, y1: st.oy - st.scale * by[0] + pad };
+  }
+
+  function layout() {
+    if (!fish) return;
+    var b = fishBox(fish), W = stage.clientWidth, H = stage.clientHeight;
+    var k = Math.min(W / (b.x1 - b.x0), H / (b.y1 - b.y0));   // css-пикселей на мм
+    paper.style.width = manifest.sheet.w * k + 'px';
+    paper.style.height = manifest.sheet.h * k + 'px';
+    paper.style.left = (W - (b.x1 - b.x0) * k) / 2 - b.x0 * k + 'px';
+    paper.style.top = (H - (b.y1 - b.y0) * k) / 2 - b.y0 * k + 'px';
+  }
+  addEventListener('resize', layout);
+
+  // Выбор рыбы — по контуру из манифеста, тем же, что напечатан на листе.
+  function buildPicks() {
+    var box = document.getElementById('picks');
+    box.textContent = '';
+    manifest.fish.forEach(function (f) {
+      var c = f.contourModel, zs = c.map(function (p) { return p[0]; }), ys = c.map(function (p) { return p[1]; });
+      var z0 = Math.min.apply(null, zs), z1 = Math.max.apply(null, zs);
+      var y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
+      var pts = c.map(function (p) { return p[0].toFixed(3) + ',' + (-p[1]).toFixed(3); }).join(' ');
+      var b = document.createElement('button');
+      b.innerHTML = '<svg viewBox="' + [z0 - 0.03, -y1 - 0.03, z1 - z0 + 0.06, y1 - y0 + 0.06].join(' ') +
+        '"><polygon points="' + pts + '" fill="#fff" stroke="#556" stroke-width="0.012" stroke-linejoin="round"/></svg>';
+      var name = document.createElement('div');
+      name.textContent = titleOf(f);
+      b.appendChild(name);
+      b.addEventListener('click', function () { startDrawing(f); });
+      box.appendChild(b);
+    });
+  }
+
+  function openPick() {
+    if (!manifest) return;
+    buildPicks();
+    show('s-pick');
+  }
+
+  function startDrawing(f) {
+    var img = new Image();
+    img.onload = function () {
+      fish = f;
+      sheetImg = img;
+      paper.width = Math.round(manifest.sheet.w * MM);
+      paper.height = Math.round(manifest.sheet.h * MM);
+      pctx.drawImage(img, 0, 0, paper.width, paper.height);
+      undo = [];
+      show('s-draw');
+      layout();
+    };
+    img.src = sheetUrl(f);
+  }
+
+  // В меню аквариума страница живёт в маленькой врезке — рисовать там негде,
+  // поэтому раскраска открывается отдельной страницей на весь экран.
+  function drawEntry() {
+    if (inFrame) { window.top.location.href = Tank.url + '/capture#draw'; return; }
+    openPick();
+  }
+  document.getElementById('b-draw').addEventListener('click', drawEntry);
+  document.getElementById('b-draw2').addEventListener('click', drawEntry);
+  document.getElementById('d-pickback').addEventListener('click', function () { show('s-start'); });
+  document.getElementById('d-back').addEventListener('click', openPick);
+  document.getElementById('b-redraw').addEventListener('click', function () { show('s-draw'); layout(); });
+
+  function remember() {
+    undo.push(pctx.getImageData(0, 0, paper.width, paper.height));
+    if (undo.length > 8) undo.shift();   // каждый снимок ~9 МБ — планшету хватит восьми
+  }
+  document.getElementById('d-undo').addEventListener('click', function () {
+    if (undo.length) pctx.putImageData(undo.pop(), 0, 0);
+  });
+  document.getElementById('d-clear').addEventListener('click', function () {
+    if (!sheetImg) return;
+    remember();
+    pctx.drawImage(sheetImg, 0, 0, paper.width, paper.height);
+  });
+
+  function at(e) {
+    var r = paper.getBoundingClientRect();
+    return [(e.clientX - r.left) * paper.width / r.width, (e.clientY - r.top) * paper.height / r.height];
+  }
+
+  // Заливка по похожему цвету: серый контур рыбы её останавливает.
+  // Пунктир плавников — нет, это осознанно: плавник обычно того же цвета.
+  function fill(x, y) {
+    var W = paper.width, H = paper.height;
+    x = x | 0; y = y | 0;
+    if (x < 0 || y < 0 || x >= W || y >= H) return;
+    var im = pctx.getImageData(0, 0, W, H), d = im.data;
+    var i0 = (y * W + x) * 4, r0 = d[i0], g0 = d[i0 + 1], b0 = d[i0 + 2];
+    var c = parseInt(color.slice(1), 16), nr = c >> 16, ng = (c >> 8) & 255, nb = c & 255;
+    if (Math.abs(r0 - nr) + Math.abs(g0 - ng) + Math.abs(b0 - nb) < 10) return;
+    var seen = new Uint8Array(W * H), stack = [y * W + x];
+    while (stack.length) {
+      var p = stack.pop();
+      if (seen[p]) continue;
+      seen[p] = 1;
+      var k = p * 4;
+      if (Math.abs(d[k] - r0) + Math.abs(d[k + 1] - g0) + Math.abs(d[k + 2] - b0) > 120) continue;
+      d[k] = nr; d[k + 1] = ng; d[k + 2] = nb;
+      var px = p % W;
+      if (px > 0) stack.push(p - 1);
+      if (px < W - 1) stack.push(p + 1);
+      if (p >= W) stack.push(p - W);
+      if (p < W * (H - 1)) stack.push(p + W);
+    }
+    pctx.putImageData(im, 0, 0);
+  }
+
+  // Apple Pencil: толщина от нажима, промежуточные точки из
+  // getCoalescedEvents — линия не ломается на быстрых штрихах. Как только
+  // карандаш коснулся холста, касания пальцем (ладонь на экране) игнорируем.
+  var active = null, last = null, penSeen = false;
+  function width(e) {
+    return e.pointerType === 'pen' && e.pressure > 0 ? sizes[size] * (0.4 + e.pressure * 1.2) : sizes[size];
+  }
+  paper.addEventListener('pointerdown', function (e) {
+    if (e.pointerType === 'pen') penSeen = true;
+    if (!sheetImg || active !== null || (penSeen && e.pointerType === 'touch')) return;
+    e.preventDefault();
+    remember();
+    var p = at(e);
+    if (tool === 'fill') { fill(p[0], p[1]); return; }
+    active = e.pointerId;
+    last = p;
+    try { paper.setPointerCapture(e.pointerId); } catch (err) { /* без захвата штрих просто обрывается на краю */ }
+    pctx.fillStyle = color;
+    pctx.beginPath();
+    pctx.arc(p[0], p[1], width(e) / 2, 0, Math.PI * 2);
+    pctx.fill();
+  });
+  paper.addEventListener('pointermove', function (e) {
+    if (e.pointerId !== active) return;
+    var evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
+    if (!evs.length) evs = [e];
+    pctx.strokeStyle = color;
+    pctx.lineCap = 'round';
+    evs.forEach(function (ev) {
+      var p = at(ev);
+      pctx.lineWidth = width(ev);
+      pctx.beginPath();
+      pctx.moveTo(last[0], last[1]);
+      pctx.lineTo(p[0], p[1]);
+      pctx.stroke();
+      last = p;
+    });
+  });
+  ['pointerup', 'pointercancel'].forEach(function (ev) {
+    paper.addEventListener(ev, function (e) { if (e.pointerId === active) { active = null; last = null; } });
+  });
+
+  document.getElementById('d-done').addEventListener('click', function () {
+    if (!sheetImg) return;
+    // Метки печатаем поверх заново — кисть по углам не должна мешать распознаванию.
+    var m = manifest.sheet, s = m.marker.size + 2;
+    ['tl', 'tr', 'bl', 'br'].forEach(function (c) {
+      var x = (m.markerPositions[c][0] - 1) * MM, y = (m.markerPositions[c][1] - 1) * MM;
+      var sx = x * sheetImg.naturalWidth / paper.width, sy = y * sheetImg.naturalHeight / paper.height;
+      pctx.drawImage(sheetImg, sx, sy, s * MM * sheetImg.naturalWidth / paper.width,
+        s * MM * sheetImg.naturalHeight / paper.height, x, y, s * MM, s * MM);
+    });
+    document.getElementById('b-redraw').hidden = false;
+    window.handlePhoto(paper);
+  });
 })();
 </script>
 </body>

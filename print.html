@@ -72,6 +72,12 @@
        иначе перед единственным листом оставалась пустая страница. */
     body.one .card { display: none; break-before: auto; page-break-before: auto; }
     body.one .card.target { display: block; }
+
+    /* Два листа на Letter, один над другим: метки масштабируются вместе с
+       листом, а капчур выравнивает по их центрам — размер ему не важен. */
+    body.two .sheet { height: calc(50vh - 1px); }
+    body.two .card + .card { break-before: auto; page-break-before: auto; }
+    body.two .card:nth-child(2n+1):not(:first-child) { break-before: page; page-break-before: always; }
   }
 </style>
 </head>
@@ -81,6 +87,7 @@
   <a href="/" class="home" data-t="print.home"></a>
   <a class="pdf" id="pdfLink" download data-t="print.pdf"></a>
   <button id="printAll" data-t="print.all"></button>
+  <button id="printTwo" data-t="print.two"></button>
 </div>
 <div class="wrap">
   <p class="note" data-t="print.note"></p>
@@ -97,6 +104,18 @@ var Q = new URLSearchParams(location.search);
 document.getElementById('printAll').addEventListener('click', function () {
   document.body.classList.remove('one');
   print();
+});
+
+// @page нельзя повесить на класс body — подкладываем правило на время печати.
+document.getElementById('printTwo').addEventListener('click', function () {
+  var page = document.createElement('style');
+  page.textContent = '@media print { @page { size: letter portrait; margin: 6mm; } }';
+  document.head.appendChild(page);
+  document.body.classList.remove('one');
+  document.body.classList.add('two');
+  print();
+  document.body.classList.remove('two');
+  page.remove();
 });
 
 // Врезка в меню аквариума: своя подложка не нужна, а высоту надо сообщать
